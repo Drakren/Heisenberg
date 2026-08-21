@@ -1,8 +1,8 @@
 # Heisenberg — Micromouse v2 (Revived)
 
-> Second-generation micromouse robot — originally built solo from
+> Second-generation micromouse robot — originally built under SAE from
 > scratch as a self-taught novice, entered at Technoxian and lost in
-> the final round, then revived years later with encoders as a
+> the final round, then revived 4 months later with encoders as a
 > deliberate hedge against a real-world failure mode discovered in
 > [Pascal](https://github.com/Drakren/Pascal): inconsistent wall paint
 > on competition mazes defeating IR-based wall detection. Placed 2nd
@@ -15,7 +15,7 @@
   <img src="docs/media/HeisenbergDemo.gif" width="500" alt="Heisenberg navigating a maze"/>
 </p>
 
-> **From solo novice build to team podium finish.** Heisenberg began as a solo project I built as a complete beginner to programming and hardware, entered at Technoxian. It was later revived during my time as team lead at the SAE Club, UIET (Panjab University), and re-entered at APOGEE '26 alongside [Pascal](https://github.com/Drakren/Pascal) — see [Why Heisenberg Came Back](#why-heisenberg-came-back) below. The GIF above shows Heisenberg live-navigating a maze during testing.
+> **From inexperienced novice build to team podium finish.** Heisenberg began as my first robotics project I built as a complete beginner to programming and hardware, entered at Technoxian. It was later revived during my time as team lead at the SAE Club, UIET (Panjab University), and re-entered at APOGEE '26 alongside [Pascal](https://github.com/Drakren/Pascal) — see [Why Heisenberg Came Back](#why-heisenberg-came-back) below. The GIF above shows Heisenberg live-navigating a maze during testing.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -31,11 +31,11 @@
 
 ## Overview
 **Origin:** Heisenberg started as my first serious robotics build —
-designed and built solo, as a complete novice to both programming and
-hardware. I spent roughly three months self-teaching maze-solving
+designed and built under SAE, as a complete novice to both programming and
+hardware. We worked on it for a month and entered it at **Technoxian** and lost in the
+final round. I spent roughly three months self-teaching maze-solving
 algorithms and embedded fundamentals from scratch before the bot was
-competition-ready. We entered it at **Technoxian** and lost in the
-final round.
+competition-ready. 
 
 **What that loss taught:** The core flood-fill + DFS logic worked, but
 without encoders, real odometry wasn't possible — the bot relied
@@ -58,13 +58,13 @@ independent entry that didn't share Pascal's IR-dependency failure
 mode.
 
 **Outcome:** Pascal placed 1st. Heisenberg placed 2nd. The same
-project that lost in a final round years earlier, as my first attempt
+project that lost in a final round few months earlier, as my first attempt
 at robotics, ended up taking a podium spot alongside the robot I
 designed as team lead.
 
 ## Why Heisenberg Came Back
 This is the part of the story that's easy to miss just from the code:
-- **Technoxian (early build):** Solo project, no encoders, ultrasonic
+- **Technoxian (early build):** First project, no encoders, ultrasonic
   + IMU only — my first real robotics build, done from a standing
   start with no prior programming or hardware experience. Lost in the
   final round.
@@ -195,8 +195,8 @@ approaches entered side by side:
 Full technical breakdown: [Pascal README](https://github.com/Drakren/Pascal)
 
 ## Acknowledgements
-Originally built solo as my first robotics project, entered at
-Technoxian. Revived years later as team lead of the SAE Club
+Originally built under SAE as my first robotics project, entered at
+Technoxian. Revived four months later as team lead of the SAE Club
 Micromouse team (**Team Mozzarella**) at UIET, Panjab University.
 Officially entered at APOGEE '26 by teammates
 [Supriya Bhardwaj](https://github.com/Supriyabhardwaj1),
