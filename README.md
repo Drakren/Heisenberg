@@ -64,7 +64,7 @@ designed as team lead.
 
 ## Why Heisenberg Came Back
 This is the part of the story that's easy to miss just from the code:
-- **Technoxian (early build):** Solo project, no encoders, ultrasonic
+- **Technoxian (early build):** Inexperience, no encoders, ultrasonic
   + IMU only — my first real robotics build, done from a standing
   start with no prior programming or hardware experience. Lost in the
   final round.
@@ -189,8 +189,8 @@ approaches entered side by side:
 Full technical breakdown: [Pascal README](https://github.com/Drakren/Pascal)
 
 ## Acknowledgements
-Originally built solo as my first robotics project, entered at
-Technoxian. Revived years later as team lead of the SAE Club
+Originally built as my first robotics project, entered at
+Technoxian. Revived 4 months later as team lead of the SAE Club
 Micromouse team (**Team Mozzarella**) at UIET, Panjab University.
 Officially entered at APOGEE '26 by teammates
 [Supriya Bhardwaj](https://github.com/Supriyabhardwaj1),
