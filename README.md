@@ -12,10 +12,10 @@
 ![Language](https://img.shields.io/badge/language-C%2FC%2B%2B-orange)
 
 <p align="center">
-  <img src="docs/media/PascalAndHeisenberg.jpg" width="500" alt="Heisenberg and Pascal micromice side by side"/>
+  <img src="docs/media/HeisenbergDemo.gif" width="500" alt="Heisenberg navigating a maze"/>
 </p>
 
-> **From solo novice build to team podium finish.** Heisenberg began as a solo project I built as a complete beginner to programming and hardware, entered at Technoxian. It was later revived during my time as team lead at the SAE Club, UIET (Panjab University), and re-entered at APOGEE '26 alongside [Pascal](https://github.com/Drakren/Pascal) — see [Why Heisenberg Came Back](#why-heisenberg-came-back) below.
+> **From solo novice build to team podium finish.** Heisenberg began as a solo project I built as a complete beginner to programming and hardware, entered at Technoxian. It was later revived during my time as team lead at the SAE Club, UIET (Panjab University), and re-entered at APOGEE '26 alongside [Pascal](https://github.com/Drakren/Pascal) — see [Why Heisenberg Came Back](#why-heisenberg-came-back) below. The GIF above shows Heisenberg live-navigating a maze during testing.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -64,7 +64,7 @@ designed as team lead.
 
 ## Why Heisenberg Came Back
 This is the part of the story that's easy to miss just from the code:
-- **Technoxian (early build):** Inexperience, no encoders, ultrasonic
+- **Technoxian (early build):** Solo project, no encoders, ultrasonic
   + IMU only — my first real robotics build, done from a standing
   start with no prior programming or hardware experience. Lost in the
   final round.
@@ -154,7 +154,8 @@ board target, and flash.
 ├── docs/
 │   ├── media/
 │   │   ├── CertOfApp.Technoxian.jpeg
-│   │   └── PascalAndHeisenberg.jpg
+│   │   ├── PascalAndHeisenberg.jpg
+│   │   └── HeisenbergDemo.gif
 │   └── Heisenberg.pdf              # (add one line describing this document)
 ├── Programs/
 │   ├── debug/                      # hardware bring-up & calibration tests
@@ -176,6 +177,11 @@ board target, and flash.
 Not a "v2 vs v3" story so much as two intentionally different
 approaches entered side by side:
 
+<p align="center">
+  <img src="docs/media/PascalAndHeisenberg.jpg" width="450" alt="Heisenberg and Pascal micromice side by side"/>
+</p>
+<p align="center"><i>Heisenberg and Pascal — the two entries that took 1st and 2nd at APOGEE '26.</i></p>
+
 | | Heisenberg | Pascal |
 |---|---|---|
 | MCU | Arduino Nano — no NVIC | STM32G431 — FPU, DWT, high-res timers |
@@ -189,15 +195,15 @@ approaches entered side by side:
 Full technical breakdown: [Pascal README](https://github.com/Drakren/Pascal)
 
 ## Acknowledgements
-Originally built as my first robotics project, entered at
-Technoxian. Revived 4 months later as team lead of the SAE Club
+Originally built solo as my first robotics project, entered at
+Technoxian. Revived years later as team lead of the SAE Club
 Micromouse team (**Team Mozzarella**) at UIET, Panjab University.
 Officially entered at APOGEE '26 by teammates
 [Supriya Bhardwaj](https://github.com/Supriyabhardwaj1),
 [Vasu Kambli](https://github.com/VasuKambli),
 [Tanish Singla](https://github.com/tanishsingla201-web),
-Aaditi Malik ([@Aaditi15](https://github.com/Aaditi15)), and
-Vikramjeet Singh ([@vikramjeetsingh-art](https://github.com/vikramjeetsingh-art)) —
+Aaditi Malik ([Aaditi15](https://github.com/Aaditi15)), and
+Vikramjeet Singh ([vikramjeetsingh-art](https://github.com/vikramjeetsingh-art)) —
 competition rules didn't allow duplicate entries under one name, so
 they were the registered entrants for Heisenberg while I led the
 overall team and the encoder-upgrade engineering. Sibling project to
