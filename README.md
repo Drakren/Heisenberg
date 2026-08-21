@@ -203,7 +203,7 @@ Officially entered at APOGEE '26 by teammates
 [Vasu Kambli](https://github.com/VasuKambli),
 [Tanish Singla](https://github.com/tanishsingla201-web),
 [Aaditi Malik](https://github.com/Aaditi15), and
-[vikramjeet Singh](https://github.com/Vikramjeetsingh-art) —
+[Vikramjeet Singh](https://github.com/vikramjeetsingh-art) —
 competition rules didn't allow duplicate entries under one name, so
 they were the registered entrants for Heisenberg while I led the
 overall team and the encoder-upgrade engineering. Sibling project to
