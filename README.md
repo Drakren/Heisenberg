@@ -65,7 +65,7 @@ designed as team lead.
 ## Why Heisenberg Came Back
 This is the part of the story that's easy to miss just from the code:
 - **Technoxian (early build):** First project, no encoders, ultrasonic
-  + IMU only — my first real robotics build, done from a standing
+  and IMU only — my first real robotics build, done from a standing
   start with no prior programming or hardware experience. Lost in the
   final round.
 - **Between Technoxian and APOGEE '26:** I was appointed team lead and
