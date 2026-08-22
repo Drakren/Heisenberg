@@ -156,7 +156,7 @@ board target, and flash.
 │   │   ├── CertOfApp.Technoxian.jpeg
 │   │   ├── PascalAndHeisenberg.jpg
 │   │   └── HeisenbergDemo.gif
-│   └── Heisenberg.pdf              # (add one line describing this document)
+│   └── Heisenberg.pdf              # hardware schematic
 ├── Programs/
 │   ├── debug/                      # hardware bring-up & calibration tests
 │   │   ├── bothMotorTest.ino
