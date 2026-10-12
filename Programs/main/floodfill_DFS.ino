@@ -1,777 +1,622 @@
-// #include "quaternionFilters.h"
-// #include "MPU9250.h"
-// #include <Wire.h>
+#include <Wire.h>
+#include <EEPROM.h>
 
-// #define I2Cclock 400000
-// #define I2Cport Wire
-// #define MPU9250_ADDRESS 0x68
+// ==========================================
+// 1. HARDWARE & PIN DEFINITIONS
+// ==========================================
+#define MPU_ADDR    0x69
+#define PWR_MGMT_1  0x6B
+#define GYRO_CONFIG 0x1B
+#define GYRO_ZOUT_H 0x47
 
-// MPU9250 myIMU(MPU9250_ADDRESS, I2Cport, I2Cclock);
+// Ultrasonic pins
+int trigf = 12, echof = 11;
+int trigr = 9,  echor = 8;
+int trigl = 13, echol = 10;
 
-// // Quaternion state for Madgwick filter
-// float q[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+// Motor pins
+int in1 = 7, in2 = 5;
+int in3 = 4, in4 = 2;
+int PWMA = 6, PWMB = 3;
 
-// // Madgwick gain (tune ~0.1–0.5)
-// float beta = 0.1f;
+// Encoder Pins
+#define LEFT_A   A0
+#define LEFT_B   A1
+#define RIGHT_A  A2
+#define RIGHT_B  A3
 
-// // Integration timing
-// float deltat = 0.0f;
-// unsigned long lastUpdate = 0;
+// ==========================================
+// 2. CONSTANTS & GAINS
+// ==========================================
+const int exploreSpeed = 80;  // Safe, steady speed for mapping
+const int runSpeed     = 130; // Aggressive speed for the final run!
 
-int trigf=10,echof=11,trigl=12,echol=13,trigr=14,echor=15;
-float distance;
-// float durationf,distancef,durationl,distancel,durationr,distancer;
+const int turnPWM      = 38;  
+const int PWM_DEADBAND = 30; 
 
-int in1=3,in2=2,in3=4,in4=7,en1=5,en2=6,stdby=8;
-int status=0;
-int s=1;
-int b=-1;
-int row=16 , col=0;
+const float LEFT_SCALE  = 1.00; 
+const float RIGHT_SCALE = 1.00;
 
-// PID gains (start with these, tuned later)
-float Kp = 1.2;
-float Ki = 0.0;    // start at 0
-float Kd = 0.00;
+// Maze physicals
+const int sideOpenThresh = 18;  
+const int stopFront      = 5;   
+const int corridorThresh = 16;
+const long TICKS_FULL_CELL = 1030; 
 
-float integral = 0;
-float lastError = 0;
-unsigned long lastTime = 0;
-const unsigned long loopMs = 50; // 50 ms control loop
+// PID Gains
+float Kp = 1.824, Ki = 0.001, Kd = 0.44;
+float K_wall = 1.5, K_yaw = 0.9; 
 
-const int baseSpeed = 120; // starting base PWM (0-255)
-const int integralLimit = 200; // tune later
+// ==========================================
+// 3. GLOBAL VARIABLES
+// ==========================================
+float leftDist = 10.0, rightDist = 10.0, frontDist = 10.0; 
+float integ = 0, lastErr = 0;
+unsigned long lastPID = 0;
 
-int matrix[16][16];
+volatile long leftCount = 0;
+volatile long rightCount = 0;
+uint8_t lastPortC;
 
-enum Axis{Y,X,Y_prime,X_prime};
-Axis axis;
+float currentYaw = 0.0;
+unsigned long lastYawTime = 0;
+float gzBias = 0.0f;
+float filteredRate = 0.0; 
+const float ANGLE_TOL = 3.0f; 
+float alpha = 0.15; 
 
-// float yaw = 0.0f;
-// float yawZero = 0.0f;    // reference so relative yaw starts at 0
-// const float ANGLE_TOL = 3.0f;  // degrees tolerance for stopping the turn
+// ==========================================
+// 4. FLOODFILL & MAZE VARIABLES
+// ==========================================
+#define NORTH 0
+#define EAST  1
+#define SOUTH 2
+#define WEST  3
 
-// // ------------- Helpers for yaw -----------------
-// static inline float normalizeAngle(float a){
-//   while (a > 180.0f) a -= 360.0f;
-//   while (a <= -180.0f) a += 360.0f;
-//   return a;
-// }
+byte currentX = 0;
+byte currentY = 0;
+byte currentHeading = NORTH; 
 
-// void updateYaw() {
-//   // Read sensors when data ready
-//   if (myIMU.readByte(MPU9250_ADDRESS, INT_STATUS) & 0x01) {
-//     // Accel
-//     myIMU.readAccelData(myIMU.accelCount);
-//     myIMU.ax = (float)myIMU.accelCount[0] * myIMU.aRes;
-//     myIMU.ay = (float)myIMU.accelCount[1] * myIMU.aRes;
-//     myIMU.az = (float)myIMU.accelCount[2] * myIMU.aRes;
+byte distances[16][16];
+byte walls[16][16]; 
 
-//     // Gyro (rad/s)
-//     myIMU.readGyroData(myIMU.gyroCount);
-//     myIMU.gx = (float)myIMU.gyroCount[0] * myIMU.gRes * DEG_TO_RAD;
-//     myIMU.gy = (float)myIMU.gyroCount[1] * myIMU.gRes * DEG_TO_RAD;
-//     myIMU.gz = (float)myIMU.gyroCount[2] * myIMU.gRes * DEG_TO_RAD;
+// EEPROM Addresses
+const int EEPROM_ADDR_WALLS = 0;
+const int EEPROM_ADDR_DIST  = 256;
+const int EEPROM_ADDR_FLAG  = 512;
+const int EEPROM_ADDR_RESET = 513; // For double reset detection
 
-//     // Mag
-//     myIMU.readMagData(myIMU.magCount);
-//     myIMU.mx = (float)myIMU.magCount[0] * myIMU.mRes;
-//     myIMU.my = (float)myIMU.magCount[1] * myIMU.mRes;
-//     myIMU.mz = (float)myIMU.magCount[2] * myIMU.mRes;
-//   }
+bool speedRunMode = false;
+bool goalReached = false;
 
-//   myIMU.updateTime();
+// Targets for returning to start
+bool returningToStart = false;
+byte targetX = 3; 
+byte targetY = 3;
 
-//   // Madgwick fusion
-//   MadgwickQuaternionUpdate(myIMU.ax, myIMU.ay, myIMU.az,
-//                            myIMU.gx, myIMU.gy, myIMU.gz,
-//                           0.0f, 0.0f, 0.0f,           //for not using 
-//                            myIMU.deltat);             //magnetometer
+// ==========================================
+// 5. INTERRUPTS & SENSORS
+// ==========================================
+ISR(PCINT1_vect) {
+  uint8_t currentPortC = PINC;
+  uint8_t changed = currentPortC ^ lastPortC;
 
-//   // Extract yaw (Z)
-//   yaw = atan2f(2.0f * (q[0]*q[3] + q[1]*q[2]),
-//                1.0f - 2.0f * (q[2]*q[2] + q[3]*q[3]));
-//   yaw *= RAD_TO_DEG;
-// }
-
-// float getRelativeYaw() {
-//   updateYaw();
-//   return normalizeAngle(yaw - yawZero);
-// }
-
-// void resetYawZero() {
-//   updateYaw();
-//   yawZero = yaw;   // now relative yaw will read ~0
-// }
-
-void setup() {
-  Wire.begin();
-  I2Cport.setClock(I2Cclock);
-
-  Serial.begin(9600);
-
-  pinMode(trigf,OUTPUT);
-  pinMode(trigl,OUTPUT);
-  pinMode(trigr,OUTPUT);
-  pinMode(echof,INPUT);
-  pinMode(echol,INPUT);
-  pinMode(echor,INPUT);
-  pinMode(in1,OUTPUT);
-  pinMode(in2,OUTPUT);
-  pinMode(in3,OUTPUT);
-  pinMode(in4,OUTPUT);
-  pinMode(en1,OUTPUT);
-  pinMode(en2,OUTPUT);
-  pinMode(stdby,OUTPUT);
-
-  analogWrite(en1,255);           //speed baad mein control karni hai, chala ke dekhne ke baad...
-  analogWrite(en2,255);
-
-  for (int i=0;i<16;i++){
-    for (int j=0;j<16;j++){
-      matrix[i][j]=0;
+  if (changed & (1 << PC0)) {
+    if (currentPortC & (1 << PC0)) {  
+      if (currentPortC & (1 << PC1)) leftCount--;
+      else leftCount++;
     }
   }
-
-  digitalWrite(stdby,HIGH);
- byte c = myIMU.readByte(MPU9250_ADDRESS, WHO_AM_I_MPU9250);
-  if (c == 0x71 || c == 0x70) {
-    myIMU.MPU9250SelfTest(myIMU.selfTest);
-    myIMU.calibrateMPU9250(myIMU.gyroBias, myIMU.accelBias);
-    myIMU.initMPU9250();
-    // myIMU.initAK8963(myIMU.magCalibration);
-    myIMU.getAres(); myIMU.getGres(); myIMU.getMres();
-    Serial.println("MPU9250 ready");
-  } else {
-    Serial.println("MPU9250 not found!");
-    while (1);
+  if (changed & (1 << PC2)) {
+    if (currentPortC & (1 << PC2)) {  
+      if (currentPortC & (1 << PC3)) rightCount++;
+      else rightCount--;
+    }
   }
-
-  // Zero heading so relative yaw starts from 0
-  resetYawZero();
-
+  lastPortC = currentPortC;
 }
 
-
-float filteredLeftDistance() {
-  static float prev = 0;
-  float raw = getDist(trigl,echol);
-  prev = 0.7 * prev + 0.3 * raw; // exponential smoothing
-  return prev;
+static inline int16_t readGyroZRaw() {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(GYRO_ZOUT_H);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_ADDR, 2, true);
+  return (Wire.read() << 8) | Wire.read();
 }
 
-float filteredRightDistance() {
-  static float prev = 0;
-  float raw = getDist(trigr,echor);
-  prev = 0.7 * prev + 0.3 * raw; 
-  return prev;
+float readGyroZ() { 
+  return (readGyroZRaw() / 131.0f) - gzBias; 
 }
 
-int applyDeadband(int pwm) {
-  if (pwm == 0) return 0; // fully stop
-  const int deadband = 60; // adjust experimentally
-  if (pwm > 0 && pwm < deadband) pwm = deadband;
-  return pwm;
+void initMPU() {
+  Wire.beginTransmission(MPU_ADDR); Wire.write(PWR_MGMT_1); Wire.write(0x00); Wire.endTransmission();
+  Wire.beginTransmission(MPU_ADDR); Wire.write(GYRO_CONFIG); Wire.write(0x00); Wire.endTransmission();
 }
 
+void calibrateGyroZ(uint16_t samples = 500) {
+  delay(300);
+  long sum = 0;
+  for (uint16_t i = 0; i < samples; i++) {
+    sum += readGyroZRaw();
+    delay(2);
+  }
+  gzBias = (sum / (float)samples) / 131.0f; 
+}
 
-void PID(){
-
+void updateYaw() {
   unsigned long now = millis();
-  if (now - lastTime < loopMs) return;
-  float dt = (now - lastTime) / 1000.0; // seconds
-  lastTime = now;
-
-  float leftDist  = filteredLeftDistance();   // cm
-  float rightDist = filteredRightDistance();  // cm
-
-  float error = leftDist - rightDist;
-
-  // Integral with anti-windup
-  integral += error * dt;
-  if (integral > integralLimit) integral = integralLimit;
-  if (integral < -integralLimit) integral = -integralLimit;
-
-  // Derivative (optionally low-pass)
-  float derivative = (error - lastError) / dt;
-  // derivative = derivativeFilter(derivative); // optional
-
-  float correction = Kp * error + Ki * integral + Kd * derivative;
-
-  lastError = error;
-
-  // Map correction to motor speeds (differential)
-  int leftPWM  = constrain((int)(baseSpeed - correction), 0, 255);
-  int rightPWM = constrain((int)(baseSpeed + correction), 0, 255);
-
-  // Compensate motor deadband if needed:
-  leftPWM  = applyDeadband(leftPWM);
-  rightPWM = applyDeadband(rightPWM);
-
-  analogWrite(en1,  leftPWM);
-  analogWrite(en2, rightPWM);
-
-  Serial.print("err:"); Serial.print(error);
-  Serial.print(" corr:"); Serial.print(correction);
-  Serial.print(" L:"); Serial.print(leftPWM);
-  Serial.print(" R:"); Serial.println(rightPWM);
-
+  float dt = (now - lastYawTime) / 1000.0f;
+  lastYawTime = now;
+  if (dt > 0 && dt < 0.1) { 
+      filteredRate = (alpha * readGyroZ()) + ((1.0f - alpha) * filteredRate);
+      currentYaw += filteredRate * dt;
+  }
 }
 
-
-float getDist(int trig,int echo){
-  for(int i=0;i<3;i++){
-  digitalWrite(trig, LOW); 
-  delayMicroseconds(2);
-  digitalWrite(trig, HIGH); 
-  delayMicroseconds(10); 
+float getDistanceSafe(int trig, int echo) {
+  digitalWrite(trig, LOW);  delayMicroseconds(2);
+  digitalWrite(trig, HIGH); delayMicroseconds(10);
   digitalWrite(trig, LOW);
-  long duration = pulseIn(echo, HIGH); 
-  distance = (duration*0.034)/2.0;
-  distance+=distance;
-  }
-  return distance/3.0;  // cm
+  long duration = pulseIn(echo, HIGH, 5000); 
+  if (duration == 0) return 1000; 
+  return duration * 0.034 / 2; 
 }
 
-void skipACell(){
-  //to make it move JUST ONE CELL ahead...
-       //bilkul thoda sa delay, to just make it move forward by one block, so that turn karne ke immediately baad ek aur turn detect kar ke ghoomta na reh jaye.
-  digitalWrite(in1,HIGH);
-  digitalWrite(in2,LOW);
-  digitalWrite(in3,HIGH);
-  digitalWrite(in4,LOW);
-  delay(800);
-
-  switch(axis){
-      case 0:                        //0=Y,1=X,2=Y',3=X'(enum)
-      row=row-1;
-      break;
-
-      case 1:
-      col=col+1;
-      break;
-
-      case 2:
-      row=row+1;
-      break;
-
-      case 3:
-      col=col-1;
-      break;
-    }
-    matrix[row][col]=s;
-      s++;
-  }
-
+void readAllSensors() {
+  leftDist  = getDistanceSafe(trigl, echol); delay(15);
+  frontDist = getDistanceSafe(trigf, echof); delay(15);
+  rightDist = getDistanceSafe(trigr, echor); delay(15);
 }
 
-void moveFront(){
+// ==========================================
+// 6. MOTOR CONTROL PRIMITIVES
+// ==========================================
+void stopMotors() {
+  digitalWrite(in1, HIGH); digitalWrite(in2, HIGH);
+  digitalWrite(in3, HIGH); digitalWrite(in4, HIGH);
+  analogWrite(PWMA, 255);  analogWrite(PWMB, 255);
   
-
-  unsigned long start = millis();
-while (millis() - start < 900) {
-  digitalWrite(in1,HIGH);
-  digitalWrite(in2,LOW);
-  digitalWrite(in3,HIGH);
-  digitalWrite(in4,LOW);
-
-  PID();  // keep correcting during movement
-}
-
-  switch(axis){
-      case 0:                        //0=Y,1=X,2=Y',3=X'(enum)
-      row=row-1;
-      break;
-
-      case 1:
-      col=col+1;
-      break;
-
-      case 2:
-      row=row+1;
-      break;
-
-      case 3:
-      col=col-1;
-      break;
-    }
-    matrix[row][col]=s;
-      s++;
-  }     
-
-
-
-void turnLeft() {
-  resetYawZero();
-  float target = -90.0;
-
-  while (fabs(getRelativeYaw() - target) > 2.0) {
-    updateYaw();
-    float error = fabs(target - getRelativeYaw());
-    int pwm = map(error, 90, 0, 180, 80);
-    pwm = constrain(pwm, 80, 180);
-
-    // Pivot: left wheel backward, right wheel forward
-    analogWrite(en1, pwm);
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, HIGH);   // left wheel backward
-
-    analogWrite(en2, pwm);
-    digitalWrite(in3, HIGH);
-    digitalWrite(in4, LOW);    // right wheel forward
-  }
-
-  stop();
-  if(axis==0){ axis=axis+3; }
-  else { axis=axis-1; }
-}
-
-
-void turnRight() {
-  resetYawZero();
-  float target = 90.0;
-
-  while (fabs(getRelativeYaw() - target) > 2.0) {
-    updateYaw();
-    float error = fabs(target - getRelativeYaw());
-    int pwm = map(error, 90, 0, 180, 80);
-    pwm = constrain(pwm, 80, 180);
-
-    // Pivot: left wheel forward, right wheel backward
-    analogWrite(en1, pwm);
-    digitalWrite(in1, HIGH);
-    digitalWrite(in2, LOW);    // left wheel forward
-
-    analogWrite(en2, pwm);
-    digitalWrite(in3, LOW);
-    digitalWrite(in4, HIGH);   // right wheel backward
-  }
-
-  stop();
-  if(axis==3){ axis=axis-3; }
-  else { axis=axis+1; }
-}
-
-
-
-void turnBack() {
-  resetYawZero();
-  float target = 180.0;
-
-  while (fabs(getRelativeYaw() - target) > 2.0) {
-    updateYaw();
-    float error = fabs(target - getRelativeYaw());
-    int pwm = map(error, 180, 0, 200, 80);
-    pwm = constrain(pwm, 80, 200);
-
-    // Pivot: left wheel forward, right wheel backward
-    analogWrite(en1, pwm);
-    digitalWrite(in1, HIGH);
-    digitalWrite(in2, LOW);    // left wheel forward
-
-    analogWrite(en2, pwm);
-    digitalWrite(in3, LOW);
-    digitalWrite(in4, HIGH);   // right wheel backward
-  }
-
-  stop();
-
-  // Update axis: (axis + 2) % 4
-  axis = (axis + 2) % 4;
-}
-
-
-void stop(){
-  //can add speed control here....and call it in move front...(so that speed is reduced on the basis of distance left between front obstacle and bot.. but that won't help much in our case, cuz we need to slow down at turns, rather than at a point when we can't go forward any further....)
-  digitalWrite(in1,LOW);
-  digitalWrite(in2,LOW);
-  digitalWrite(in3,LOW);
-  digitalWrite(in4,LOW);
-  delay(1000);
-}
-
-void goForward(){
-  //think of a way to keep it from being called again and again in  the loop...(it will get called every time we exit the while loop of leftPriority..)
-  while(getDist(trigr,echor)<25||getDist(trigl,echol)<25){
-    moveFront();
-  }
-  status=1;
-}
-
-void rightPriority(){
-  moveFront();
-  if(getDist(trigr,echor)>25){
-    turnRight();
-    skipACell();
-  }
-  else if(getDist(trigf,echof)>25){
-    moveFront();
-  }
-  else if(getDist(trigl,echol)>25){
-    turnLeft();
-    skipACell();
-  }
-}
-
-void leftPriority(){
-  moveFront();
-  if(getDist(trigl,echol)>25){
-    turnLeft();
-    skipACell();
-  }
-  else if(getDist(trigf,echof)>25){
-    moveFront();
-  }
-  else if(getDist(trigr,echor)>25){
-    turnRight();
-    skipACell();
-  }
-}
-
-void moveBack(){
-  //to make it move JUST ONE CELL ahead...the digitalWrite part of this code will remain same as moveFront...
-  //bilkul thoda sa delay, to just make it move forward by one block, so that turn karne ke immediately baad ek aur turn detect kar ke ghoomta na reh jaye.
-
-   unsigned long start = millis();
-while (millis() - start < 900) {
-   digitalWrite(in1,HIGH);
-  digitalWrite(in2,LOW);
-  digitalWrite(in3,HIGH);
-  digitalWrite(in4,LOW);
-
-  PID();  // keep correcting during movement
-}
-       
-  switch(axis){
-      case 0:
-      row=row-1;
-      matrix[row][col]=b;
-      b--;
-      break;
-
-      case 1:
-      col=col+1;
-      matrix[row][col]=b;
-      b--;
-      break;
-
-      case 2:
-      row=row+1;
-      matrix[row][col]=b;
-      b--;
-      break;
-      
-      case 3:
-      col=col-1;
-      matrix[row][col]=b;
-      b--;
-      break;
-    }
-  }     
-
-
-bool leftClear(){
-  int r=row,c=col;
-  switch(axis){
-    case 2:
-    if (matrix[r][c+1]==0){
-      return true;
-    }else return false;
-
-    case 1:
-    if(matrix[r-1][c]==0){
-      return true;
-    }else return false;
-
-    case 3:
-    if (matrix[r+1][c]==0){
-      return true;
-    }  else return false;
-
-    case 0:
-    if(matrix[r][c-1]==0){
-      return true;
-    }else return false;
-    
-  }
-}
-
-
-bool rightClear(){
-  int r=row,c=col;
-  switch(axis){
-    case 2:
-    if (matrix[r][c-1]==0){
-      return true;
-    }else return false;
-
-    case 1:
-    if(matrix[r+1][c]==0){
-      return true;
-    }else return false;
-
-    case 3:
-    if (matrix[r-1][c]==0){
-      return true;
-    }  else return false;
-
-    case 0:
-    if(matrix[r][c+1]==0){
-      return true;
-    }else return false;
-
-  }
-}
-
-bool frontClear(){
-  int r=row,c=col;
-  switch(axis){
-    case 2:
-    if (matrix[r+1][c]==0){
-      return true;
-    }else return false;
-
-    case 1:
-    if(matrix[r][c+1]==0){
-      return true;
-    }else return false;
-
-    case 3:
-    if (matrix[r][c-1]==0){
-      return true;
-    }else return false;
-
-    case 0:
-    if(matrix[r-1][c]==0){
-      return true;
-    }else return false;
-
-  }
-}
-
-bool leftVisited(){
-  int r=row,c=col;
-  switch(axis){
-    case 2:
-    if (matrix[r][c+1]>0){
-      return true;
-    }else return false;
-
-    case 1:
-    if(matrix[r-1][c]>0){
-      return true;
-    }else return false;
-
-    case 3:
-    if (matrix[r+1][c]>0){
-      return true;
-    }else return false;
-    
-
-    case 0:
-    if(matrix[r][c-1]>0){
-      return true;
-    }else return false;
-  }
-}
-
-bool rightVisited(){
-  int r=row,c=col;
-  switch(axis){
-    case 2:
-    if (matrix[r][c-1]>0){
-      return true;
-    }else return false;
-
-    case 1:
-    if(matrix[r+1][c]>0){
-      return true;
-    }else return false;
-
-    case 3:
-    if (matrix[r-1][c]>0){
-      return true;
-    }else return false;
-    
-
-    case 0:
-    if(matrix[r][c+1]>0){
-      return true;
-    }else return false;
-  }
-}
-
-bool frontVisited(){
-  int r=row,c=col;
-  switch(axis){
-    case 2:
-    if (matrix[r+1][c]>0){
-      return true;
-    }else return false;
-
-    case 1:
-    if(matrix[r][c+1]>0){
-      return true;
-    }else return false;
-
-    case 3:
-    if (matrix[r][c-1]>0){
-      return true;
-    }else return false;
-    
-    case 0:
-    if(matrix[r-1][c]>0){
-      return true;
-    }else return false;
-  }
-}
-
-void backtrack() {
-  int r=row, c=col;
-  int lastBlockedCell=s;
-  turnBack();
-  moveBack();
-  while(!leftClear()||!rightClear()||!frontClear()){
-  switch(axis) {
-    case 0:
-    if(getDist(trigr,echor)>25&&matrix[r][c+1]==lastBlockedCell-1){
-      turnRight();
-      moveBack();
-    }
-    else if(getDist(trigl,echol)>25&&matrix[r][c-1]==lastBlockedCell-1){
-      turnLeft();
-      moveBack();
-    }
-    else if(getDist(trigf,echof)>25&&matrix[r-1][c]==lastBlockedCell-1){
-      moveBack();
-    }else{
-      if(getDist(trigr,echor)>25&&rightVisited()){
-        turnRight();
-        moveBack();
-      }else if(getDist(trigl,echol)>25&&leftVisited()){
-        turnLeft();
-        moveBack();
-      }else{
-      moveBack();
-      }
-    }
-    break;
-
-    case 1:
-    if(getDist(trigr,echor)>25&&matrix[r+1][c]==lastBlockedCell-1){
-      turnRight();
-      moveBack();
-    }
-    else if(getDist(trigl,echol)>25&&matrix[r-1][c]==lastBlockedCell-1){
-      turnLeft();
-      moveBack();
-    }
-    else if(getDist(trigf,echof)>25&&matrix[r][c+1]==lastBlockedCell-1){
-      moveBack();
-    }else{
-      if(getDist(trigr,echor)>25&&rightVisited()){
-        turnRight();
-        moveBack();
-      }else if(getDist(trigl,echol)>25&&leftVisited()){
-        turnLeft();
-        moveBack();
-      }else{
-      moveBack();
-      }
-    }
-    break;
-
-    case 2:
-    if(getDist(trigr,echor)>25&&matrix[r][c-1]==lastBlockedCell-1){
-      turnRight();
-      moveBack();
-    }
-    else if(getDist(trigl,echol)>25&&matrix[r][c+1]==lastBlockedCell-1){
-      turnLeft();
-      moveBack();
-    }
-    else if(getDist(trigf,echof)>25&&matrix[r+1][c]==lastBlockedCell-1){
-      moveBack();
-    }else{
-      if(getDist(trigr,echor)>25&&rightVisited()){
-        turnRight();
-        moveBack();
-      }else if(getDist(trigl,echol)>25&&leftVisited()){
-        turnLeft();
-        moveBack();
-      }else{
-      moveBack();
-      }
-    }
-    break;
-
-    case 3:
-    if(getDist(trigr,echor)>25&&matrix[r-1][c]==lastBlockedCell-1){
-      turnRight();
-      moveBack();
-    }
-    else if(getDist(trigl,echol)>25&&matrix[r+1][c]==lastBlockedCell-1){
-      turnLeft();
-      moveBack();
-    }
-    else if(getDist(trigf,echof)>25&&matrix[r][c-1]==lastBlockedCell-1){
-      moveBack();
-    }else{
-      if(getDist(trigr,echor)>25&&rightVisited()){
-        turnRight();
-        moveBack();
-      }else if(getDist(trigl,echol)>25&&leftVisited()){
-        turnLeft();
-        moveBack();
-      }else{
-      moveBack();
-      }
-    }
-    break;
-    }
-
-  }    //while se bahar jiske bhi clear hone ki vajah se nikla hoga.. us cell par chala jayega..
-  if(leftClear()){
-    turnLeft();
-    moveFront();
-  }
-  else if(rightClear()){
-    turnRight();
-    moveFront();
-  }
-  else if(frontClear()){
-    moveFront();
-  }
-
-}
+  delay(60); 
   
+  digitalWrite(in1, LOW); digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW); digitalWrite(in4, LOW);
+  analogWrite(PWMA, 0);   analogWrite(PWMB, 0);
+}
 
-bool blocked() {
-  if((getDist(trigr,echor)<25 && getDist(trigl,echol)<25 && getDist(trigf,echof)<25)/*||(!leftClear() && !rightClear() && !frontClear())*/||(getDist(trigr,echor)<25 && getDist(trigl,echol)<25 && !frontClear())||(getDist(trigl,echol)<25 &&getDist(trigf,echof)<25 && !rightClear())||(getDist(trigr,echor)<25 && getDist(trigf,echof)<25 && !leftClear())){
-    return true;
-  }else return false;
+void driveMotors(int left, int right) {
+  float lf = constrain(left * LEFT_SCALE, -255, 255);
+  float rf = constrain(right * RIGHT_SCALE, -255, 255);
+
+  if (abs(lf) < PWM_DEADBAND) lf = (lf > 0) ? PWM_DEADBAND : -PWM_DEADBAND;
+  if (abs(rf) < PWM_DEADBAND) rf = (rf > 0) ? PWM_DEADBAND : -PWM_DEADBAND;
+
+  if (lf >= 0) { digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  }
+  else         { digitalWrite(in1, LOW);  digitalWrite(in2, HIGH); }
+
+  if (rf >= 0) { digitalWrite(in3, HIGH); digitalWrite(in4, LOW);  }
+  else         { digitalWrite(in3, LOW);  digitalWrite(in4, HIGH); }
+
+  analogWrite(PWMA, abs((int)lf));
+  analogWrite(PWMB, abs((int)rf));
+}
+
+void resetPID() {
+  integ = 0; lastErr = 0; currentYaw = 0; filteredRate = 0.0;
+  lastYawTime = millis(); lastPID = millis();
+}
+
+void turnByAngle(float targetAngleDeg) {
+  resetPID();
+  if (targetAngleDeg < 0) {
+    digitalWrite(in1, LOW);  digitalWrite(in2, HIGH); 
+    digitalWrite(in3, HIGH); digitalWrite(in4, LOW);  
+  } else {
+    digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  
+    digitalWrite(in3, LOW);  digitalWrite(in4, HIGH); 
+  }
+  
+  analogWrite(PWMA, turnPWM); analogWrite(PWMB, turnPWM);
+  float targetAbs = fabs(targetAngleDeg);
+
+  while (true) {
+    updateYaw();
+    if (fabs(currentYaw) >= targetAbs - ANGLE_TOL) break;
+  }
+  stopMotors(); delay(100);
+}
+
+void driveCellsForward(int numCells) {
+  resetPID();
+  noInterrupts(); leftCount = 0; rightCount = 0; interrupts();
+  
+  long targetTicks = TICKS_FULL_CELL * numCells;
+  
+  int activeSpeed = speedRunMode ? runSpeed : exploreSpeed;
+
+  while (true) {
+    noInterrupts();
+    long currentL = abs(leftCount); long currentR = abs(rightCount);
+    interrupts();
+
+    if ((currentL + currentR) / 2 >= targetTicks) break;
+
+    updateYaw();
+    
+    leftDist  = getDistanceSafe(trigl, echol);
+    frontDist = getDistanceSafe(trigf, echof);
+    rightDist = getDistanceSafe(trigr, echor);
+    
+    if (frontDist > 0 && frontDist < stopFront) {
+      Serial.println(F("Crash avoided! Stopping early."));
+      break; 
+    }
+    
+    float err = 0;
+    float idealDist = corridorThresh / 2.0; 
+    
+    if (leftDist < corridorThresh && rightDist < corridorThresh) {
+        err = rightDist - leftDist;
+    } 
+    else if (leftDist < corridorThresh) {
+        float wallErr = idealDist - leftDist;
+        err = (wallErr * K_wall) - (currentYaw * K_yaw);
+    } 
+    else if (rightDist < corridorThresh) {
+        float wallErr = rightDist - idealDist;
+        err = (wallErr * K_wall) - (currentYaw * K_yaw);
+    } 
+    else {
+        err = -currentYaw * K_yaw;
+    }
+
+    unsigned long now = millis();
+    float dt = (now - lastPID) / 1000.0f;
+    lastPID = now;
+    if (dt <= 0) dt = 0.05;
+
+    integ += err * dt;
+    integ = constrain(integ, -100.0f, 100.0f);
+    float deriv = (err - lastErr) / dt;
+    float corr  = Kp*err + Ki*integ + Kd*deriv;
+    lastErr = err;
+
+    driveMotors(activeSpeed - (int)corr, activeSpeed + (int)corr);
+  }
+  stopMotors(); 
+  
+  if (!speedRunMode) {
+    delay(100);
+  }
+}
+
+// ==========================================
+// 7. MAZE & ALGORITHM LOGIC
+// ==========================================
+bool hasWall(byte x, byte y, byte dir) {
+  return (walls[x][y] & (1 << dir)) != 0;
+}
+
+void setWall(byte x, byte y, byte dir) {
+  walls[x][y] |= (1 << dir);
+  if (dir == NORTH && y < 15) walls[x][y+1] |= (1 << SOUTH);
+  if (dir == SOUTH && y > 0)  walls[x][y-1] |= (1 << NORTH);
+  if (dir == EAST  && x < 15) walls[x+1][y] |= (1 << WEST);
+  if (dir == WEST  && x > 0)  walls[x-1][y] |= (1 << EAST);
+}
+
+void mapWalls() {
+  if (speedRunMode) return; 
+  readAllSensors();
+  if (frontDist < sideOpenThresh) setWall(currentX, currentY, currentHeading);
+  if (rightDist < sideOpenThresh) setWall(currentX, currentY, (currentHeading + 1) % 4);
+  if (leftDist < sideOpenThresh) setWall(currentX, currentY, (currentHeading + 3) % 4);
+}
+
+void initializeMaze() {
+  for (int x = 0; x < 16; x++) {
+    for (int y = 0; y < 16; y++) {
+      walls[x][y] = 0;
+      distances[x][y] = 255; 
+      if (x == 0)  setWall(x, y, WEST);
+      if (x == 15) setWall(x, y, EAST);
+      if (y == 0)  setWall(x, y, SOUTH);
+      if (y == 15) setWall(x, y, NORTH);
+    }
+  }
+  setWall(0, 4, SOUTH);
+}
+
+void printMaze() {
+  Serial.println(F("========================================"));
+  Serial.print(F("Robot at: ("));
+  Serial.print(currentX); Serial.print(F(","));
+  Serial.print(currentY); Serial.print(F(") | Heading: "));
+  
+  if (currentHeading == NORTH) Serial.println(F("NORTH ^"));
+  else if (currentHeading == EAST) Serial.println(F("EAST >"));
+  else if (currentHeading == SOUTH) Serial.println(F("SOUTH v"));
+  else if (currentHeading == WEST) Serial.println(F("WEST <"));
+  Serial.println(F("----------------------------------------"));
+
+  for (int y = 15; y >= 0; y--) {
+    for (int x = 0; x < 16; x++) {
+      if (x == currentX && y == currentY) {
+        Serial.print(F("[XX] ")); 
+      } else if (x == 3 && y == 3) {
+        Serial.print(F(" ** "));
+      } else {
+        byte dist = distances[x][y];
+        if (dist == 255) {
+          Serial.print(F(" --  ")); 
+        } else {
+          if (dist < 10) Serial.print(F("  "));
+          else if (dist < 100) Serial.print(F(" "));
+          Serial.print(dist);
+          Serial.print(F("  "));
+        }
+      }
+    }
+    Serial.println(); 
+  }
+  Serial.println(F("========================================"));
+}
+
+void floodFill() {
+  for (int x = 0; x < 16; x++) {
+    for (int y = 0; y < 16; y++) {
+      distances[x][y] = 255;
+    }
+  }
+
+  byte qX[256], qY[256];
+  byte head = 0, tail = 0;
+
+  // Dynamically paths to targetX and targetY
+  byte goals[1][2] = {{targetX, targetY}};
+  for(int i=0; i<1; i++) {
+    distances[goals[i][0]][goals[i][1]] = 0;
+    qX[tail] = goals[i][0]; qY[tail] = goals[i][1];
+    tail++;
+  }
+
+  while (head != tail) {
+    byte cx = qX[head]; byte cy = qY[head];
+    head++;
+    byte currentDist = distances[cx][cy];
+
+    if (!hasWall(cx, cy, NORTH) && distances[cx][cy+1] == 255) {
+      distances[cx][cy+1] = currentDist + 1;
+      qX[tail] = cx; qY[tail] = cy+1; tail++;
+    }
+    if (!hasWall(cx, cy, EAST) && distances[cx+1][cy] == 255) {
+      distances[cx+1][cy] = currentDist + 1;
+      qX[tail] = cx+1; qY[tail] = cy; tail++;
+    }
+    if (!hasWall(cx, cy, SOUTH) && distances[cx][cy-1] == 255) {
+      distances[cx][cy-1] = currentDist + 1;
+      qX[tail] = cx; qY[tail] = cy-1; tail++;
+    }
+    if (!hasWall(cx, cy, WEST) && distances[cx-1][cy] == 255) {
+      distances[cx-1][cy] = currentDist + 1;
+      qX[tail] = cx-1; qY[tail] = cy; tail++;
+    }
+  }
+}
+
+byte calculateNextHeading(byte checkX, byte checkY, byte checkHeading) {
+  byte bestDir = checkHeading; 
+  byte minVal = 255;
+
+  for (int i = 0; i < 4; i++) {
+    byte checkDir = (checkHeading + i) % 4; 
+    
+    if (!hasWall(checkX, checkY, checkDir)) {
+      byte neighborVal = 255;
+      if (checkDir == NORTH) neighborVal = distances[checkX][checkY+1];
+      if (checkDir == EAST)  neighborVal = distances[checkX+1][checkY];
+      if (checkDir == SOUTH) neighborVal = distances[checkX][checkY-1];
+      if (checkDir == WEST)  neighborVal = distances[checkX-1][checkY];
+
+      if (neighborVal < minVal) {
+        minVal = neighborVal;
+        bestDir = checkDir;
+      }
+    }
+  }
+  return bestDir;
+}
+
+int getContinuousStraightCells() {
+  int cells = 1;
+  byte scanX = currentX;
+  byte scanY = currentY;
+  byte scanHeading = currentHeading;
+
+  while(true) {
+    if (scanHeading == NORTH) scanY++;
+    if (scanHeading == EAST)  scanX++;
+    if (scanHeading == SOUTH) scanY--;
+    if (scanHeading == WEST)  scanX--;
+
+    if (distances[scanX][scanY] == 0) break;
+
+    byte nextPredictedHeading = calculateNextHeading(scanX, scanY, scanHeading);
+    
+    if (nextPredictedHeading == scanHeading) {
+      cells++;
+    } else {
+      break; 
+    }
+  }
+  return cells;
+}
+
+void turnTo(byte targetHeading) {
+  if (targetHeading == currentHeading) return; 
+
+  int turnDiff = targetHeading - currentHeading;
+  if (turnDiff == 1 || turnDiff == -3) {
+    turnByAngle(-90.0); 
+  } else if (turnDiff == -1 || turnDiff == 3) {
+    turnByAngle(90.0); 
+  } else {
+    turnByAngle(180.0); 
+  }
+  currentHeading = targetHeading;
+}
+
+void updateCoordinates() {
+  if (currentHeading == NORTH) currentY++;
+  if (currentHeading == EAST)  currentX++;
+  if (currentHeading == SOUTH) currentY--;
+  if (currentHeading == WEST)  currentX--;
+}
+
+// ==========================================
+// 8. EEPROM STORAGE
+// ==========================================
+void saveMaze() {
+  EEPROM.put(EEPROM_ADDR_WALLS, walls);
+  EEPROM.put(EEPROM_ADDR_DIST, distances);
+  EEPROM.put(EEPROM_ADDR_FLAG, (byte)0xAA); 
+  Serial.println(F("Saved Map to EEPROM!"));
+}
+
+void loadMaze() {
+  byte flag;
+  EEPROM.get(EEPROM_ADDR_FLAG, flag);
+  if (flag == 0xAA) {
+    EEPROM.get(EEPROM_ADDR_WALLS, walls);
+    EEPROM.get(EEPROM_ADDR_DIST, distances);
+    speedRunMode = true;
+    Serial.println(F("Map Loaded! Speed Run Mode."));
+  } else {
+    Serial.println(F("No valid map in EEPROM. Exploring."));
+    initializeMaze();
+  }
+}
+
+// ==========================================
+// 9. MAIN ARDUINO SETUP & LOOP
+// ==========================================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(trigf, OUTPUT); pinMode(echof, INPUT);
+  pinMode(trigl, OUTPUT); pinMode(echol, INPUT);
+  pinMode(trigr, OUTPUT); pinMode(echor, INPUT);
+  pinMode(in1, OUTPUT); pinMode(in2, OUTPUT);
+  pinMode(in3, OUTPUT); pinMode(in4, OUTPUT);
+  pinMode(PWMA, OUTPUT); pinMode(PWMB, OUTPUT);
+
+  pinMode(LEFT_A, INPUT_PULLUP);  pinMode(LEFT_B, INPUT_PULLUP);
+  pinMode(RIGHT_A, INPUT_PULLUP); pinMode(RIGHT_B, INPUT_PULLUP);
+  PCICR |= (1 << PCIE1);
+  PCMSK1 |= (1 << PCINT8) | (1 << PCINT9) | (1 << PCINT10) | (1 << PCINT11);
+  lastPortC = PINC;
+
+  Wire.begin();
+  initMPU();
+  calibrateGyroZ(500); 
+
+  // Double-Press Reset Logic (Kept untouched as requested)
+  byte resetFlag;
+  EEPROM.get(EEPROM_ADDR_RESET, resetFlag);
+  
+  if (resetFlag == 0xBB) {
+    // Flag is 0xBB, board was reset TWICE in a row
+    EEPROM.put(EEPROM_ADDR_RESET, (byte)0x00); // Clear the flag
+    loadMaze();
+    Serial.println(F("Double Reset Detected! Speed Run starts in 3 seconds..."));
+    delay(3000); 
+  } else {
+    // First boot / single reset. Set the flag to 0xBB.
+    EEPROM.put(EEPROM_ADDR_RESET, (byte)0xBB);
+    // Give the user 750 milliseconds to press reset again to trigger the mode.
+    delay(750); 
+    initializeMaze();
+  }
 }
 
 void loop() {
-
-  if(status==0){
-    axis=0;
-    matrix[row][col]=s;
-    s++;
-    goForward();
+  // Clear the double-press flag once the main loop starts safely
+  static bool firstLoop = true;
+  if (firstLoop) {
+    EEPROM.put(EEPROM_ADDR_RESET, (byte)0x00);
+    firstLoop = false;
   }
-  while(!blocked()) {
-    rightPriority();
-  }
-  
-  backtrack();
 
-  while(!blocked()) {
-    leftPriority();
-  }
-  
-  backtrack();
+  if (goalReached) return; 
 
+  if (distances[currentX][currentY] == 0) {
+    stopMotors();
+    
+    if (!speedRunMode && !returningToStart) {
+      // Phase 1: Reached the center! Switch target to (0,0)
+      Serial.println(F("Center reached! Navigating back to Start..."));
+      returningToStart = true;
+      targetX = 0;
+      targetY = 0;
+      floodFill(); // Recalculate immediately so distance is > 0
+      delay(1000); // Pause for a second before doing the 180 turn
+    } 
+    else if (!speedRunMode && returningToStart) {
+      // === UPDATED PHASE 2 LOGIC (15-SECOND DELAY) ===
+      Serial.println(F("Mapping complete! 180 Turn and 15s Delay..."));
+      
+      // 1. Point the map back to the center (3,3) for the speed run
+      targetX = 3; 
+      targetY = 3;
+      floodFill(); 
+      saveMaze();  // Save it to EEPROM just in case!
+      
+      // 2. Execute the 180-degree turn to face back into the maze
+      byte nextHeading = calculateNextHeading(currentX, currentY, currentHeading);
+      turnTo(nextHeading);
+      
+      // 3. Stop for exactly 15 seconds so you can place the bot perfectly by hand
+      stopMotors();
+      Serial.println(F("Bot stopped. Place it perfectly! You have 15 seconds..."));
+      delay(7000);
+      
+      // 4. Reset encoders and PID right before launch so manual adjustments aren't registered as tracking errors
+      noInterrupts(); 
+      leftCount = 0; 
+      rightCount = 0; 
+      interrupts();
+      resetPID();
+      
+      // 5. Engage speed run mode and instantly launch
+      speedRunMode = true;
+      Serial.println(F("Speed Run Engaged! Launching..."));
+      return; 
+    } 
+    else if (speedRunMode) {
+      // Phase 3: Reached the center during the speed run!
+      Serial.println(F("Speed Run Finished!"));
+      goalReached = true;
+      while(true); 
+    }
+    
+    return; // Skip the rest of this loop iteration
+  }
+
+  if (!speedRunMode) {
+    mapWalls();
+    floodFill();
+  }
+
+  byte nextHeading = calculateNextHeading(currentX, currentY, currentHeading);
+  turnTo(nextHeading);
+
+  int cellsToDrive = 1;
+  if (speedRunMode) {
+    cellsToDrive = getContinuousStraightCells(); 
+  }
+
+  driveCellsForward(cellsToDrive);
+
+  for (int i = 0; i < cellsToDrive; i++) {
+    updateCoordinates();
+  }
 }
-
-
-
